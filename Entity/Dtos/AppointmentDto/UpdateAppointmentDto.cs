@@ -3,10 +3,11 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using Entity.Dtos.Base;
 
 namespace Entity.Dtos.AppointmentDto
 {
-    internal class UpdateAppointmentDto
+    public class UpdateAppointmentDto : BaseDto
     {
         public DateTime Date { get; set; }
         public string Reason { get; set; }

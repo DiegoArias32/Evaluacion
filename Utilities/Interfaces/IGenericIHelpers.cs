@@ -11,7 +11,7 @@ namespace Utilities.Interfaces
     /// Interfaz unificada que agrupa utilidades generales para validación, manejo de usuarios, roles, fechas, contraseñas y encabezados de autenticación.
     /// Hereda de <see cref="IPasswordHelper"/>, <see cref="IAuthHeaderHelper"/>, <see cref="IDatetimeHelper"/>, <see cref="IRoleHelper"/>, <see cref="IUserHelper"/> y <see cref="IValidationHelper"/>.
     /// </summary>
-    public interface IGenericIHelpers : IPasswordHelper, IAuthHeaderHelper, IDatetimeHelper, IRoleHelper, IUserHelper, IValidationHelper
+    public interface IGenericIHelpers : IDatetimeHelper,  IValidationHelper
     {
     }
 

@@ -1,364 +1,276 @@
-﻿using Microsoft.Extensions.Configuration;
-using Microsoft.EntityFrameworkCore;
-using Microsoft.EntityFrameworkCore.Storage;
+﻿using Microsoft.EntityFrameworkCore;
+using Entity.Model;
 using Entity.Model.Base;
-using System.Data;
-using Dapper;
-using System.Linq.Expressions;
-using Entity.Model.Security;
-using Entity.Model.DatesPerson;
+using System.Reflection;
 
 namespace Entity.Context
 {
+    /// <summary>
+    /// Contexto de base de datos para el sistema de gestión médica.
+    /// Maneja las entidades principales: Pacientes, Doctores y Citas Médicas.
+    /// </summary>
     public class ApplicationDbContext : DbContext
     {
-        protected readonly IConfiguration _configuration;
-        
-        public ApplicationDbContext(DbContextOptions<ApplicationDbContext> options, IConfiguration configuration) : base(options)
+        /// <summary>
+        /// Constructor del contexto que recibe las opciones de configuración
+        /// </summary>
+        /// <param name="options">Opciones de configuración del contexto</param>
+        public ApplicationDbContext(DbContextOptions<ApplicationDbContext> options) : base(options)
         {
-            _configuration = configuration;
         }
 
-        // DbSets de Security
-        public DbSet<User> Users { get; set; }
-        public DbSet<Rol> Roles { get; set; }
-        public DbSet<RolUser> RolUsers { get; set; }
-        public DbSet<Person> Persons { get; set; }
-        public DbSet<Permission> Permissions { get; set; }
-        public DbSet<Form> Forms { get; set; }
-        public DbSet<Module> Modules { get; set; }
-        public DbSet<FormModule> FormModules { get; set; }
-        public DbSet<RolFormPermission> RolFormPermissions { get; set; }
+        /// <summary>
+        /// DbSet para gestionar las entidades de Pacientes
+        /// </summary>
+        public DbSet<Patient> Patients { get; set; }
 
-        // DbSets de DatesPerson
-        public DbSet<Address> Addresses { get; set; }
-        public DbSet<Country> Countries { get; set; }
-        public DbSet<Department> Departments { get; set; }
-        public DbSet<City> Cities { get; set; }
-        public DbSet<Neighborhood> Neighborhoods { get; set; }
-        public DbSet<Client> Clients { get; set; }
-        public DbSet<Employee> Employees { get; set; }
-        public DbSet<Provider> Providers { get; set; }
+        /// <summary>
+        /// DbSet para gestionar las entidades de Doctores
+        /// </summary>
+        public DbSet<Doctor> Doctors { get; set; }
 
-protected override void OnModelCreating(ModelBuilder modelBuilder)
-{
-    // Configuración de RolUser - FIXED to prevent cascade conflicts
-    modelBuilder.Entity<RolUser>()
-        .HasKey(ru => new { ru.UserId, ru.RolId });
+        /// <summary>
+        /// DbSet para gestionar las entidades de Citas Médicas
+        /// </summary>
+        public DbSet<Appointment> Appointments { get; set; }
 
-    // Main user relationship - keep CASCADE
-    modelBuilder.Entity<RolUser>()
-        .HasOne(ru => ru.User)
-        .WithMany(u => u.RolUsers)
-        .HasForeignKey(ru => ru.UserId)
-        .OnDelete(DeleteBehavior.Cascade);
+        /// <summary>
+        /// Configura el modelo de datos y las relaciones entre entidades
+        /// </summary>
+        /// <param name="modelBuilder">Constructor del modelo</param>
+        protected override void OnModelCreating(ModelBuilder modelBuilder)
+        {
+            base.OnModelCreating(modelBuilder);
 
-    // AssignedBy user relationship - change to NO ACTION to prevent cascade conflict
-    modelBuilder.Entity<RolUser>()
-        .HasOne(ru => ru.AssignedByUser)  // Assuming you have this navigation property
-        .WithMany()
-        .HasForeignKey(ru => ru.AssignedByUserId)
-        .OnDelete(DeleteBehavior.NoAction);
+            // Aplicar configuraciones automáticamente desde el assembly
+            modelBuilder.ApplyConfigurationsFromAssembly(Assembly.GetExecutingAssembly());
 
-    modelBuilder.Entity<RolUser>()
-        .HasOne(ru => ru.Rol)
-        .WithMany(r => r.RolUsers)
-        .HasForeignKey(ru => ru.RolId)
-        .OnDelete(DeleteBehavior.Cascade);
-            
-            // Configuración de FormModule
-            modelBuilder.Entity<FormModule>()
-                .HasKey(fm => new { fm.FormId, fm.ModuleId });
-            
-            modelBuilder.Entity<FormModule>()
-                .HasOne(fm => fm.Form)
-                .WithMany(f => f.FormModules)
-                .HasForeignKey(fm => fm.FormId);
-            
-            modelBuilder.Entity<FormModule>()
-                .HasOne(fm => fm.Module)
-                .WithMany(m => m.FormModules)
-                .HasForeignKey(fm => fm.ModuleId);
-            
-            // Configuración de RolFormPermission
-            modelBuilder.Entity<RolFormPermission>()
-                .HasKey(rfp => new { rfp.RolId, rfp.FormId, rfp.PermissionId });
-            
-            modelBuilder.Entity<RolFormPermission>()
-                .HasOne(rfp => rfp.Rol)
-                .WithMany(r => r.RolFormPermissions)
-                .HasForeignKey(rfp => rfp.RolId);
-            
-            modelBuilder.Entity<RolFormPermission>()
-                .HasOne(rfp => rfp.Form)
-                .WithMany(f => f.RolFormPermissions)
-                .HasForeignKey(rfp => rfp.FormId);
-            
-            modelBuilder.Entity<RolFormPermission>()
-                .HasOne(rfp => rfp.Permission)
-                .WithMany(p => p.RolFormPermissions)
-                .HasForeignKey(rfp => rfp.PermissionId);
-            
-            // Configuración de User-Person (1:1)
-            modelBuilder.Entity<User>()
-                .HasOne(u => u.Person)
-                .WithOne(p => p.User)
-                .HasForeignKey<User>(u => u.PersonId);
-            
-            // Configuración de Person-Address
-            modelBuilder.Entity<Person>()
-                .HasOne(p => p.Address)
-                .WithMany(a => a.Persons)
-                .HasForeignKey(p => p.AddressId);
-            
-            // Configuración de Provider-Person
-            modelBuilder.Entity<Provider>()
-                .HasOne(pr => pr.Person)
-                .WithMany()
-                .HasForeignKey(pr => pr.PersonId)
-                .IsRequired(false);
-            
-            // Configuración de Provider-Address
-            modelBuilder.Entity<Provider>()
-                .HasOne(pr => pr.Address)
-                .WithMany(a => a.Providers)
-                .HasForeignKey(pr => pr.AddressId)
-                .IsRequired(false);
-            
-            // Configuración de jerarquía geográfica
-            modelBuilder.Entity<Department>()
-                .HasOne(d => d.Country)
-                .WithMany(c => c.Departments)
-                .HasForeignKey(d => d.CountryId);
-            
-            modelBuilder.Entity<City>()
-                .HasOne(c => c.Department)
-                .WithMany(d => d.Cities)
-                .HasForeignKey(c => c.DepartmentId);
-            
-            modelBuilder.Entity<Neighborhood>()
-                .HasOne(n => n.City)
-                .WithMany(c => c.Neighborhoods)
-                .HasForeignKey(n => n.CityId);
-            
-            // Configuraciones de Address con jerarquía geográfica
-            modelBuilder.Entity<Address>()
-                .HasOne(a => a.Country)
-                .WithMany(c => c.Addresses)
-                .HasForeignKey(a => a.CountryId)
-                .IsRequired(false);
-            
-            modelBuilder.Entity<Address>()
-                .HasOne(a => a.Department)
-                .WithMany(d => d.Addresses)
-                .HasForeignKey(a => a.DepartmentId)
-                .IsRequired(false);
-            
-            modelBuilder.Entity<Address>()
-                .HasOne(a => a.City)
-                .WithMany(c => c.Addresses)
-                .HasForeignKey(a => a.CityId)
-                .IsRequired(false);
-            
-            modelBuilder.Entity<Address>()
-                .HasOne(a => a.Neighborhood)
-                .WithMany(n => n.Addresses)
-                .HasForeignKey(a => a.NeighborhoodId)
-                .IsRequired(false);
-            
-            // Configuración de herencia TPH para Client y Employee
-            modelBuilder.Entity<Client>()
-                .HasBaseType<Person>();
-            
-            modelBuilder.Entity<Employee>()
-                .HasBaseType<Person>();
-                
-            // Configuración para todas las entidades que heredan de BaseEntity (existente)
-            foreach (var entityType in modelBuilder.Model.GetEntityTypes()
-                .Where(t => t.ClrType.IsSubclassOf(typeof(BaseEntity))))
+            // Configuración global para todas las entidades que hereden de BaseEntity
+            ConfigureBaseEntityProperties(modelBuilder);
+
+            // Configuración específica de Patient
+            ConfigurePatient(modelBuilder);
+
+            // Configuración específica de Doctor
+            ConfigureDoctor(modelBuilder);
+
+            // Configuración específica de Appointment
+            ConfigureAppointment(modelBuilder);
+
+            // Configurar relaciones
+            ConfigureRelationships(modelBuilder);
+        }
+
+        /// <summary>
+        /// Configura las propiedades comunes para todas las entidades que heredan de BaseEntity
+        /// </summary>
+        /// <param name="modelBuilder">Constructor del modelo</param>
+        private void ConfigureBaseEntityProperties(ModelBuilder modelBuilder)
+        {
+            foreach (var entityType in modelBuilder.Model.GetEntityTypes())
             {
-                modelBuilder.Entity(entityType.ClrType)
-                    .Property("CreatedAt")
+                if (typeof(BaseEntity).IsAssignableFrom(entityType.ClrType))
+                {
+                    // Configurar propiedades comunes de BaseEntity
+                    modelBuilder.Entity(entityType.ClrType)
+                        .Property("Id")
+                        .IsRequired();
+
+                    modelBuilder.Entity(entityType.ClrType)
+                        .Property("CreatedAt")
+                        .IsRequired()
+                        .HasDefaultValueSql("GETDATE()");
+
+                    modelBuilder.Entity(entityType.ClrType)
+                        .Property("UpdatedAt")
+                        .IsRequired()
+                        .HasDefaultValueSql("GETDATE()");
+
+                    modelBuilder.Entity(entityType.ClrType)
+                        .Property("Status")
+                        .IsRequired()
+                        .HasDefaultValue(true);
+
+                    // Índice en Status para optimizar consultas de entidades activas
+                    modelBuilder.Entity(entityType.ClrType)
+                        .HasIndex("Status")
+                        .HasDatabaseName($"IX_{entityType.ClrType.Name}_Status");
+                }
+            }
+        }
+
+        /// <summary>
+        /// Configuración específica para la entidad Patient
+        /// </summary>
+        /// <param name="modelBuilder">Constructor del modelo</param>
+        private void ConfigurePatient(ModelBuilder modelBuilder)
+        {
+            modelBuilder.Entity<Patient>(entity =>
+            {
+                entity.ToTable("Patients");
+
+                entity.Property(p => p.Name)
+                    .IsRequired()
+                    .HasMaxLength(200);
+
+                entity.Property(p => p.Email)
+                    .IsRequired()
+                    .HasMaxLength(200);
+
+                entity.Property(p => p.Phone)
                     .IsRequired();
-                    
-                modelBuilder.Entity(entityType.ClrType)
-                    .Property("UpdatedAt")
-                    .IsRequired(false);
-                    
-                modelBuilder.Entity(entityType.ClrType)
-                    .Property("DeleteAt")
-                    .IsRequired(false);
-                    
-                modelBuilder.Entity(entityType.ClrType)
-                    .Property("Status")
-                    .HasDefaultValue(true);
-            }
 
-            foreach (var entityType in modelBuilder.Model.GetEntityTypes()
-            .Where(t =>
-            typeof(BaseEntity).IsAssignableFrom(t.ClrType) &&
-            t.BaseType == null)) // Solo entidades raíz
+                entity.Property(p => p.DNI)
+                    .IsRequired();
+
+                // Índices para optimización
+                entity.HasIndex(p => p.Email)
+                    .IsUnique()
+                    .HasDatabaseName("IX_Patients_Email");
+
+                entity.HasIndex(p => p.DNI)
+                    .IsUnique()
+                    .HasDatabaseName("IX_Patients_DNI");
+
+                entity.HasIndex(p => p.Name)
+                    .HasDatabaseName("IX_Patients_Name");
+            });
+        }
+
+        /// <summary>
+        /// Configuración específica para la entidad Doctor
+        /// </summary>
+        /// <param name="modelBuilder">Constructor del modelo</param>
+        private void ConfigureDoctor(ModelBuilder modelBuilder)
+        {
+            modelBuilder.Entity<Doctor>(entity =>
             {
-                var parameter = Expression.Parameter(entityType.ClrType, "e");
-                var property = Expression.Property(parameter, nameof(BaseEntity.Status));
-                var condition = Expression.Equal(property, Expression.Constant(true));
-                var lambda = Expression.Lambda(condition, parameter);
+                entity.ToTable("Doctors");
 
-                modelBuilder.Entity(entityType.ClrType).HasQueryFilter(lambda);
-            }
+                entity.Property(d => d.Name)
+                    .IsRequired()
+                    .HasMaxLength(200);
 
+                entity.Property(d => d.Specialty)
+                    .IsRequired()
+                    .HasMaxLength(100);
+
+                // Índices para optimización
+                entity.HasIndex(d => d.Name)
+                    .HasDatabaseName("IX_Doctors_Name");
+
+                entity.HasIndex(d => d.Specialty)
+                    .HasDatabaseName("IX_Doctors_Specialty");
+            });
         }
 
-        // Resto de tu código existente...
-        protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
+        /// <summary>
+        /// Configuración específica para la entidad Appointment
+        /// </summary>
+        /// <param name="modelBuilder">Constructor del modelo</param>
+        private void ConfigureAppointment(ModelBuilder modelBuilder)
         {
-            optionsBuilder.EnableSensitiveDataLogging();
+            modelBuilder.Entity<Appointment>(entity =>
+            {
+                entity.ToTable("Appointments");
+
+                entity.Property(a => a.Date)
+                    .IsRequired();
+
+                entity.Property(a => a.Reason)
+                    .IsRequired()
+                    .HasMaxLength(500);
+
+                entity.Property(a => a.PatientId)
+                    .IsRequired();
+
+                entity.Property(a => a.DoctorId)
+                    .IsRequired();
+
+                // Índices para optimización
+                entity.HasIndex(a => a.Date)
+                    .HasDatabaseName("IX_Appointments_Date");
+
+                entity.HasIndex(a => a.PatientId)
+                    .HasDatabaseName("IX_Appointments_PatientId");
+
+                entity.HasIndex(a => a.DoctorId)
+                    .HasDatabaseName("IX_Appointments_DoctorId");
+
+                // Índice compuesto para evitar citas duplicadas (opcional)
+                entity.HasIndex(a => new { a.DoctorId, a.Date })
+                    .HasDatabaseName("IX_Appointments_DoctorDate");
+            });
         }
 
-        protected override void ConfigureConventions(ModelConfigurationBuilder configurationBuilder)
+        /// <summary>
+        /// Configura las relaciones entre entidades
+        /// </summary>
+        /// <param name="modelBuilder">Constructor del modelo</param>
+        private void ConfigureRelationships(ModelBuilder modelBuilder)
         {
-            configurationBuilder.Properties<decimal>().HavePrecision(18, 2);
+            // Relación Appointment -> Patient (Muchas citas pueden tener un paciente)
+            modelBuilder.Entity<Appointment>()
+                .HasOne(a => a.Patient)
+                .WithMany()
+                .HasForeignKey(a => a.PatientId)
+                .OnDelete(DeleteBehavior.Restrict)
+                .HasConstraintName("FK_Appointments_Patients");
+
+            // Relación Appointment -> Doctor (Muchas citas pueden tener un doctor)
+            modelBuilder.Entity<Appointment>()
+                .HasOne(a => a.Doctor)
+                .WithMany()
+                .HasForeignKey(a => a.DoctorId)
+                .OnDelete(DeleteBehavior.Restrict)
+                .HasConstraintName("FK_Appointments_Doctors");
         }
 
+        /// <summary>
+        /// Override del método SaveChanges para manejar automáticamente la auditoría
+        /// </summary>
+        /// <returns>Número de entidades afectadas</returns>
         public override int SaveChanges()
         {
-            EnsureAudit();
+            UpdateAuditFields();
             return base.SaveChanges();
         }
 
-        public override Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess, CancellationToken cancellationToken = default)
+        /// <summary>
+        /// Override del método SaveChangesAsync para manejar automáticamente la auditoría
+        /// </summary>
+        /// <param name="cancellationToken">Token de cancelación</param>
+        /// <returns>Número de entidades afectadas</returns>
+        public override async Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
         {
-            EnsureAudit();
-            return base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
+            UpdateAuditFields();
+            return await base.SaveChangesAsync(cancellationToken);
         }
 
-        public async Task<IEnumerable<T>> QueryAsync<T>(string text, object? parameters = null, int? timeout = null, CommandType? type = null)
+        /// <summary>
+        /// Actualiza automáticamente los campos de auditoría para todas las entidades modificadas
+        /// </summary>
+        private void UpdateAuditFields()
         {
-           using var command = new DapperEFCoreCommand(this, text, parameters ?? new { }, timeout, type, CancellationToken.None);
-           var connection = this.Database.GetDbConnection();
-           return await connection.QueryAsync<T>(command.Definition);
-        }
-
-        public async Task<T?> QueryFirstOrDefaultAsync<T>(string text, object? parameters = null, int? timeout = null, CommandType? type = null)
-        {
-           using var command = new DapperEFCoreCommand(this, text, parameters ?? new { }, timeout, type, CancellationToken.None);
-           var connection = this.Database.GetDbConnection();
-           return await connection.QueryFirstOrDefaultAsync<T>(command.Definition);
-        }        
-        
-        public IQueryable<T> GetActiveSet<T>() where T : class
-        {
-            var query = Set<T>().AsQueryable();
-            var parameter = Expression.Parameter(typeof(T), "e");
-            
-            if (typeof(T).GetProperty("Status") != null)
-            {
-                try {
-                    var property = Expression.Property(parameter, "Status");
-                    var value = Expression.Constant(true);
-                    var equal = Expression.Equal(property, value);
-                    var lambda = Expression.Lambda<Func<T, bool>>(equal, parameter);
-                    query = query.Where(lambda);
-                }
-                catch {
-                    // Si hay algún error, devolvemos el query sin filtrar
-                }
-            }
-            
-            return query;
-        }
-
-        private static bool GetPropertyValue(object obj, string propertyName)
-        {
-            var property = obj.GetType().GetProperty(propertyName);
-            if (property == null)
-            {
-                return false;
-            }
-            return property.GetValue(obj, null) is bool value ? value : false;
-        }
-        
-        public IQueryable<T> GetPaged<T>(IQueryable<T> query, int page, int pageSize) where T : class
-        {
-            if (page <= 0) page = 1;
-            if (pageSize <= 0) pageSize = 10;
-            
-            return query.Skip((page - 1) * pageSize).Take(pageSize);
-        }
-         
-        public async Task<List<T>> ToListAsyncSafe<T>(IQueryable<T> query)
-        {
-            if (query == null)
-                return new List<T>();
-                
-            return await EntityFrameworkQueryableExtensions.ToListAsync(query);
-        }
-
-        private void EnsureAudit()
-        {
-            ChangeTracker.DetectChanges();
-
             var entries = ChangeTracker.Entries()
-                .Where(e => e.Entity is BaseEntity);
-
-            var currentDateTime = DateTime.UtcNow;
+                .Where(e => e.Entity is BaseEntity && (e.State == EntityState.Added || e.State == EntityState.Modified));
 
             foreach (var entry in entries)
             {
-                if (entry.Entity is BaseEntity entity)
+                var entity = (BaseEntity)entry.Entity;
+
+                if (entry.State == EntityState.Added)
                 {
-                    switch (entry.State)
-                    {
-                        case EntityState.Added:
-                            entity.CreatedAt = currentDateTime;
-                            entity.Status = true;
-                            break;
-
-                        case EntityState.Modified:
-                            entity.UpdatedAt = currentDateTime;
-
-                            // Detectar delete lógico: si Status fue cambiado a false
-                            var statusProp = entry.Property("Status");
-                            if (statusProp.IsModified && statusProp.CurrentValue is bool status && status == false)
-                            {
-                                entity.DeleteAt = currentDateTime;
-                            }
-
-                            break;
-
-                        case EntityState.Deleted:
-                            // Este es delete físico
-                            entity.DeleteAt = currentDateTime;
-                            entity.Status = false;
-                            break;
-                    }
+                    entity.CreatedAt = DateTime.UtcNow;
+                    entity.UpdatedAt = DateTime.UtcNow;
+                }
+                else if (entry.State == EntityState.Modified)
+                {
+                    entity.UpdatedAt = DateTime.UtcNow;
+                    // Asegurar que CreatedAt no se modifique en updates
+                    entry.Property(nameof(BaseEntity.CreatedAt)).IsModified = false;
                 }
             }
-        }
-
-        public readonly struct DapperEFCoreCommand : IDisposable
-        {
-            public DapperEFCoreCommand(DbContext context, string text, object parameters, int? timeout, CommandType? type, CancellationToken ct)
-            {
-                var transaction = context.Database.CurrentTransaction?.GetDbTransaction();
-                var commandType = type ?? CommandType.Text;
-                var commandTimeout = timeout ?? context.Database.GetCommandTimeout() ?? 30;
-
-                Definition = new CommandDefinition(
-                    text,
-                    parameters,
-                    transaction,
-                    commandTimeout,
-                    commandType,
-                    cancellationToken: ct
-                );
-            }
-
-           public CommandDefinition Definition { get; }
-
-           public void Dispose()
-           {
-           }
         }
     }
 }

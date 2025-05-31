@@ -1,191 +1,137 @@
-using System.Text;
-using Microsoft.EntityFrameworkCore;
-using Microsoft.AspNetCore.Authentication.JwtBearer;
-using Microsoft.IdentityModel.Tokens;
-
-using Entity.Context;
-using Data.Interfaces;
-using Business.Interfaces;
+using AutoMapper;
 using Business.Implements;
-using Utilities.Interfaces;
-using Utilities.Helpers;
-using Utilities.Mail;
-using Utilities.Jwt;
-using Web.ServiceExtension;
+using Business.Interfaces;
+using Data.Implements;
+using Data.Interfaces;
+using Entity.Context;
 using FluentValidation;
 using FluentValidation.AspNetCore;
-using Business.Services;
-using Data.Implements.BaseDate;
-using Data.Implements.BaseData;
-using Data.Implements.Security.PersonData;
-using Data.Implements.Security.RolData;
-using Data.Implements.Security.RolUserData;
-using Data.Implements.Security.UserDate;
-using Data.Interfaces.Security;
-using Business.Interfaces.Security;
-using Business.Implements.Security;
-
-
-
-
-
-
-
+using Microsoft.EntityFrameworkCore;
+using System.Reflection;
+using Utilities.Helpers;
+using Utilities.Interfaces;
+using Utilities.Mappers.Profiles;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Add controllers
-builder.Services.AddControllers();
-
-builder.Services.AddValidatorsFromAssemblyContaining(typeof(Program));
-builder.Services.AddSingleton<IValidatorFactory>(sp =>
-    new ServiceProviderValidatorFactory(sp));
-
-// Add Swagger documentation using extension method
-builder.Services.AddSwaggerDocumentation();
-
-// Add DbContext
+// Configuración de Entity Framework
 builder.Services.AddDbContext<ApplicationDbContext>(options =>
     options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));
 
-// Configure email service
-builder.Services.Configure<SmtpSettings>(builder.Configuration.GetSection("SmtpSettings"));
+// Configuración de AutoMapper
+builder.Services.AddAutoMapper(typeof(PatientProfile));
 
-builder.Services.AddScoped<IEmailService, EmailService>();
-builder.Services.Configure<AppSettings>(builder.Configuration.GetSection("AppSettings"));
-
-
-// Configure JWT
-builder.Services.AddScoped<IJwtGenerator, GenerateTokenJwt>();
-
-// Register generic repositories and business logic
-
-
-// Existing code remains unchanged
-builder.Services.AddScoped(typeof(IBaseModelData<>), typeof(BaseModelData<>));
-
-builder.Services.AddScoped(typeof(IBaseBusiness<,>), typeof(BaseBusiness<,>));
-
-builder.Services.AddScoped<IPersonData, PersonData>();
-builder.Services.AddScoped<IPersonBusiness, PersonBusiness>();
-
-
-// Register User-specific services
-builder.Services.AddScoped<IUserData, UserData>();
-builder.Services.AddScoped<IUserBusiness, UserBusiness>();
-
-// Register Role-specific services
-builder.Services.AddScoped<IRolData, RolData>();
-builder.Services.AddScoped<IRolBusiness, RolBusiness>();
-
-builder.Services.AddScoped<IAuthService, AuthService>();
-builder.Services.AddScoped<IJwtService, JwtService>();
-
-// Register RoleUser-specific services
-builder.Services.AddScoped<IRolUserData, RolUserData>();
-builder.Services.AddScoped<IRoleUserBusiness, RoleUserBusiness>();
-
-// Register utility helpers
-builder.Services.AddScoped<IGenericIHelpers, GenericHelpers>();
-builder.Services.AddScoped<IDatetimeHelper, DatetimeHelper>();
-builder.Services.AddScoped<IPasswordHelper, PasswordHelper>();
-builder.Services.AddScoped<IAuthHeaderHelper, AuthHeaderHelper>();
-builder.Services.AddScoped<IRoleHelper, RoleHelper>();
-builder.Services.AddScoped<IUserHelper, UserHelper>();
-builder.Services.AddScoped<IValidationHelper, ValidationHelper>();
-
-// Configure JWT Authentication
-builder.Services.AddAuthentication(options =>
+// Configuración de Logging
+builder.Services.AddLogging(logging =>
 {
-    options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
-    options.DefaultChallengeScheme = JwtBearerDefaults.AuthenticationScheme;
-}).AddJwtBearer(options =>
-{
-    var key = Encoding.ASCII.GetBytes(builder.Configuration["JWT:Key"] ?? throw new InvalidOperationException("JWT:Key is not configured"));
-    options.TokenValidationParameters = new TokenValidationParameters
-    {
-        ValidateIssuerSigningKey = true,
-        IssuerSigningKey = new SymmetricSecurityKey(key),
-        ValidateIssuer = false,
-        ValidateAudience = false,
-        ValidateLifetime = true,
-        ClockSkew = TimeSpan.Zero
-    };
+    logging.AddConsole();
+    logging.AddDebug();
 });
 
-var origenesPermitidos = builder.Configuration.GetValue<string>("origenesPermitidos")!.Split(";");
+// Registro de dependencias - Data Layer
+builder.Services.AddScoped<IAppointmentData, AppointmentData>();
+builder.Services.AddScoped<IDoctorData, DoctorData>();
+builder.Services.AddScoped<IPatientData, PatientData>();
+
+// Registro de dependencias - Business Layer
+builder.Services.AddScoped<IAppointmentBusiness, AppointmentBusiness>();
+builder.Services.AddScoped<IDoctorBusiness, DoctorBusiness>();
+builder.Services.AddScoped<IPatientBusiness, PatientBusiness>();
+
+// Registro de utilidades
+builder.Services.AddScoped<IGenericIHelpers, GenericHelpers>();
+builder.Services.AddScoped<IDatetimeHelper, DatetimeHelper>();
+builder.Services.AddScoped<IValidationHelper, ValidationHelper>();
+
+// Configuración de Controllers (si es Web API)
+builder.Services.AddControllers();
+
+// Configuración de Swagger para documentación de API
+builder.Services.AddEndpointsApiExplorer();
+builder.Services.AddSwaggerGen(c =>
 {
-    builder.Services.AddCors(options =>
+    c.SwaggerDoc("v1", new Microsoft.OpenApi.Models.OpenApiInfo
     {
-        options.AddDefaultPolicy(optionsCORS =>
-        {
-            optionsCORS.WithOrigins(origenesPermitidos).AllowAnyMethod().AllowAnyHeader();
-        });
+        Title = "Medical Management API",
+        Version = "v1",
+        Description = "API para gestión de citas médicas, doctores y pacientes"
     });
 
-    // Register AutoMapper
-    builder.Services.AddAutoMapper(AppDomain.CurrentDomain.GetAssemblies());
-
-    var app = builder.Build();
-
-    // Configure the HTTP request pipeline
-    if (app.Environment.IsDevelopment())
+    // Incluir comentarios XML en Swagger
+    var xmlFile = $"{Assembly.GetExecutingAssembly().GetName().Name}.xml";
+    var xmlPath = Path.Combine(AppContext.BaseDirectory, xmlFile);
+    if (File.Exists(xmlPath))
     {
-        app.UseSwagger();
-        app.UseSwaggerUI(c =>
-        {
-            c.SwaggerEndpoint("/swagger/v1/swagger.json", "API Sistema de Gestión v1");
-            c.RoutePrefix = string.Empty; // Para servir Swagger UI en la raíz
-        });
+        c.IncludeXmlComments(xmlPath);
     }
+});
 
-    // Use custom exception handling middleware
-    app.UseExceptionHandler(appError =>
-    {
-        appError.Run(async context =>
+// Configuración de CORS (si es necesario)
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy("AllowSpecificOrigin",
+        policy =>
         {
-            context.Response.StatusCode = StatusCodes.Status500InternalServerError;
-            context.Response.ContentType = "application/json";
-
-            await context.Response.WriteAsync(new
-            {
-                StatusCode = context.Response.StatusCode,
-                Message = "Error interno del servidor."
-            }.ToString());
+            policy.WithOrigins("http://localhost:3000", "https://localhost:3000") // Ajusta según tus necesidades
+                  .AllowAnyHeader()
+                  .AllowAnyMethod();
         });
+});
+
+// Configuración de validación con FluentValidation
+builder.Services.AddFluentValidationAutoValidation();
+builder.Services.AddFluentValidationClientsideAdapters();
+builder.Services.AddValidatorsFromAssemblyContaining<Program>();
+
+var app = builder.Build();
+
+// Pipeline de middleware
+if (app.Environment.IsDevelopment())
+{
+    app.UseSwagger();
+    app.UseSwaggerUI(c =>
+    {
+        c.SwaggerEndpoint("/swagger/v1/swagger.json", "Medical Management API v1");
+        c.RoutePrefix = string.Empty; // Para que Swagger esté en la raíz
     });
-
-    // Enable CORS
-    app.UseCors();
-
-    app.UseHttpsRedirection();
-
-    // Add authentication & authorization
-    app.UseAuthentication();
-    app.UseAuthorization();
-
-    app.MapControllers();
-    // Inicializar base de datos y aplicar migraciones
-    using (var scope = app.Services.CreateScope())
-    {
-        var services = scope.ServiceProvider;
-        try
-        {
-            var dbContext = services.GetRequiredService<ApplicationDbContext>();
-            var logger = services.GetRequiredService<ILogger<Program>>();
-
-            // Aplicar migraciones (esto crea la BD si no existe y aplica todas las migraciones)
-            dbContext.Database.Migrate();
-            logger.LogInformation("Base de datos verificada y migraciones aplicadas exitosamente.");
-        }
-        catch (Exception ex)
-        {
-            var logger = services.GetRequiredService<ILogger<Program>>();
-            logger.LogError(ex, "Ocurrió un error durante la migración de la base de datos.");
-        }
-    }
-
-    app.Run();
-
-
+    app.UseDeveloperExceptionPage();
 }
+else
+{
+    app.UseExceptionHandler("/Error");
+    app.UseHsts();
+}
+
+app.UseHttpsRedirection();
+app.UseStaticFiles();
+
+app.UseRouting();
+
+// Aplicar política de CORS
+app.UseCors("AllowSpecificOrigin");
+
+app.UseAuthentication(); // Si tienes autenticación
+app.UseAuthorization();
+
+app.MapControllers();
+
+// Migración automática de base de datos (opcional - solo para desarrollo)
+using (var scope = app.Services.CreateScope())
+{
+    var context = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+    try
+    {
+        // Aplicar migraciones pendientes
+        context.Database.Migrate();
+
+        // Semilla de datos inicial (opcional)
+        // await SeedData.Initialize(context);
+    }
+    catch (Exception ex)
+    {
+        var logger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
+        logger.LogError(ex, "Error al aplicar migraciones o semillas de datos");
+    }
+}
+
+app.Run();
